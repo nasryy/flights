@@ -1,0 +1,1057 @@
+---
+title: "ST2195"
+output: 
+  pdf_document:
+    keep_tex: yes
+date: "2024-03-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, warning=FALSE}
+library(MASS)
+library(ggplot2)
+library(data.table)
+library(dplyr)
+library(zoo)
+library(lubridate)
+```
+
+# Q1
+
+## Part (a)
+
+```{r q1ai}
+# create necessary functions
+f = function(x) {
+  return(0.5 * exp(-abs(x)))
+}
+
+random_walk_metropolis_a = function(x0, N, s) {
+  samples = c(x0)
+  for (i in 1:N) {
+    x_prev = samples[length(samples)]
+    x_curr = rnorm(1, mean = x_prev, sd = s)
+    ratio = f(x_curr) / f(x_prev)
+    u = runif(1)
+    if (log(u) < log(ratio)) {
+      samples = c(samples, x_curr)
+    } else {
+      samples = c(samples, x_prev)
+    }
+  }
+  return(samples)
+}
+```
+
+```{r q1aii, warning=FALSE}
+# execute random walk
+set.seed(0)
+
+x0 = 0
+N = 10000
+s = 1
+
+samples = random_walk_metropolis_a(x0, N, s)
+true_dist = seq(min(samples), max(samples), length.out = 1000)
+
+
+combined_plot = ggplot(data.frame(x = samples), aes(x)) +
+  geom_histogram(bins = 50, aes(y = ..density.., fill = "Histogram")) +
+  geom_density(aes(color = "Kernel Density"), size = 1) +
+  geom_line(data = data.frame(x = true_dist, y = f(true_dist)),
+            aes(x = x, y = y, color = "True Distribution"),
+            size = 1) +
+  labs(title = "Random Walk Metropolis Algorithm", x = "x", 
+       y = "Probability Density") +
+  scale_fill_manual(name = "Legend", values = "lightblue") +
+  scale_color_manual(name = "Legend",
+                     values = c("Kernel Density" = "red",
+                                "True Distribution" = "dark green"))
+
+print(combined_plot)
+```
+
+```{r qa1iii, warning=FALSE}
+sample_mean = mean(samples)
+sample_std = sd(samples)
+cat("Sample Mean:", sample_mean, "\n")
+cat("Sample Standard Deviation:", sample_std, "\n")
+```
+
+## Part (b)
+
+```{r q1bi}
+# create necessary functions
+random_walk_metropolis_b = function(N, s, J) {
+  chains = matrix(nrow = J, ncol = N + 1)
+  Mj = c()
+  Vj = c()
+  x0_lst = rnorm(J, 0, 1)
+  
+  for (i in 1:J) {
+    x0 = x0_lst[i]
+    samples = random_walk_metropolis_a(x0, N, s)
+    chains[i, ] = samples
+    Mj = c(Mj, mean(samples))
+    Vj = c(Vj, var(samples))
+  }
+  
+  W = mean(Vj)
+  M = mean(Mj)
+  B = var(Mj)
+  R = sqrt((B + W) / W)
+  
+  return(R)
+}
+```
+
+```{r q1bii}
+# execute random walk
+set.seed(0)
+N = 2000
+s = 0.001
+J = 4
+R = random_walk_metropolis_b(N, s, J)
+cat("Value of R when N = 2000, s = 0.001, and J = 4:", R, "\n")
+```
+```{r q1biii}
+set.seed(0)
+s_lst <- seq(0.001, 1, length.out = 1000)
+R_lst <- numeric(length(s_lst))
+
+for (i in seq_along(s_lst)) {
+  R_lst[i] <- random_walk_metropolis_b(N, s_lst[i], J)
+}
+
+hist(R_lst, breaks = 50, probability = TRUE, col = "lightblue", 
+     main = "Histogram of Samples", xlab = "R_lst", ylab = "Density")
+
+```
+```{r q1biv}
+filtered_R = R_lst[R_lst >= 1 & R_lst <= 1.05]
+hist(filtered_R,  breaks = 50, probability = TRUE, col = "lightblue", 
+     main = "Histogram of Samples", xlab = "R_lst", ylab = "Density",
+     xlim = c(1, 1.05))
+```
+
+# Q2
+
+## Part (a)
+
+```{r load_dfs}
+df1998 <- fread("dataverse_files/1998.csv.bz2")
+```
+
+### 1998 Data
+
+Step by step process is done for the first year of data to clarify what the codes does
+
+```{r isDelayed_column}
+# Find the hour that the flight was scheduled to depart
+df1998$CRSDepHour <- floor(df1998$CRSDepTime / 100)
+
+# A flight is considered to be delayed if any of the delay variables have a 
+# value of 1
+df1998$isDelayed <- ifelse(df1998$DepDelay > 0 | 
+                           df1998$ArrDelay > 0 | 
+                           df1998$CarrierDelay > 0 | 
+                           df1998$WeatherDelay > 0 | 
+                           df1998$NASDelay > 0 | 
+                           df1998$SecurityDelay > 0 | 
+                           df1998$LateAircraftDelay > 0, 
+                           TRUE, FALSE)
+
+head(df1998)
+```
+
+```{r total_flights_per_hour}
+# Find the total number of flights that occurred for each hour
+df1998_grouped_hour <- df1998 %>% 
+  group_by(CRSDepHour) %>%
+  summarize(count = n()) %>%
+  rename(total_count = count)
+df1998_grouped_hour
+```
+
+```{r delayed_flights}
+# find all delayed flights
+df1998_delayed <- df1998 %>%
+  filter(isDelayed)
+head(df1998_delayed)
+```
+
+```{r delayed_flights_per_hour}
+# find the number of delayed flights for each hour
+df1998_delayed_grouped_hour <- df1998_delayed %>% 
+  group_by(CRSDepHour) %>%
+  summarize(count = n()) %>%
+  rename(delayed_count = count)
+df1998_delayed_grouped_hour
+```
+
+```{r delayed_prob_per_hour}
+# find the historical probability of a flight being delayed for each hour
+delayed_prob_hour_1998 = left_join(df1998_grouped_hour, df1998_delayed_grouped_hour,
+                              by = 'CRSDepHour')
+all_hours = data.frame(CRSDepHour = 0:24)
+delayed_prob_hour_1998 = left_join(all_hours, delayed_prob_hour_1998,
+                              by = 'CRSDepHour')
+delayed_prob_hour_1998 = na.fill(delayed_prob_hour_1998, fill = 0)
+delayed_prob_hour_1998 <- as.data.frame(delayed_prob_hour_1998)
+delayed_prob_hour_1998$delayed_prob <- delayed_prob_hour_1998$delayed_count / delayed_prob_hour_1998$total_count
+delayed_prob_hour_1998
+```
+
+```{r plot_delayed_prob1}
+barplot(delayed_prob_hour_1998$delayed_prob, names.arg = delayed_prob_hour_1998$CRSDepHour,
+        xlab = 'Hour of the Day',
+        ylab = 'Historical Probability of Delayed Flights',
+        main = 'Historical Probability of Delayed Flights by Hour in 1998',
+        col = 'deepskyblue3')
+```
+
+```{r total_flights_per_day}
+# Find the total number of flights that occurred for each hour
+df1998_grouped_day <- df1998 %>% 
+  group_by(DayOfWeek) %>%
+  summarize(count = n()) %>%
+  rename(total_count = count)
+df1998_grouped_day
+```
+
+```{r delayed_flights_per_day}
+# find the number of delayed flights for each day
+df1998_delayed_grouped_day <- df1998_delayed %>% 
+  group_by(DayOfWeek) %>%
+  summarize(count = n()) %>%
+  rename(delayed_count = count)
+df1998_delayed_grouped_day
+```
+
+```{r delayed_prob_per_day}
+# find the historical probability of a flight being delayed for each day
+delayed_prob_day_1998 = left_join(df1998_grouped_day, df1998_delayed_grouped_day,
+                              by = 'DayOfWeek')
+delayed_prob_day_1998 = na.fill(delayed_prob_day_1998, fill = 0)
+delayed_prob_day_1998 <- as.data.frame(delayed_prob_day_1998)
+delayed_prob_day_1998$delayed_prob <- delayed_prob_day_1998$delayed_count / delayed_prob_day_1998$total_count
+delayed_prob_day_1998
+```
+
+```{r plot_delayed_prob}
+barplot(delayed_prob_day_1998$delayed_prob, names.arg = delayed_prob_day_1998$DayOfWeek,
+        xlab = 'Day of the Week',
+        ylab = 'Historical Probability of Delayed Flights',
+        main = 'Historical Probability of Delayed Flights by Day in 1998',
+        col = 'deepskyblue3')
+```
+
+### 1999 Data
+```{r delayed_prob_hr_func}
+# create function to reduce repeated code
+find_delayed_probability_hour <- function(year) {
+  if (year == 2001 | year == 2002) {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"), encoding = "Latin-1")
+  } else {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"))
+  }
+  
+  df <- fread(paste0("dataverse_files/", year, ".csv.bz2"))
+  
+  # Find the hour that the flight was scheduled to depart
+  df$CRSDepHour <- floor(df$CRSDepTime / 100)
+  
+  # A flight is considered to be delayed if any of the delay variables have a value of 1
+  df$isDelayed <- ifelse(df$DepDelay > 0 | 
+                                  df$ArrDelay > 0 | 
+                                  df$CarrierDelay > 0 | 
+                                  df$WeatherDelay > 0 | 
+                                  df$NASDelay > 0 | 
+                                  df$SecurityDelay > 0 | 
+                                  df$LateAircraftDelay > 0, 
+                                TRUE, FALSE)
+  
+  # Find the total number of flights that occurred for each hour
+  df_grouped_hour <- df %>% 
+    group_by(CRSDepHour) %>%
+    summarize(count = n()) %>%
+    rename(total_count = count)
+  
+  # find all delayed flights
+  df_delayed <- df %>%
+    filter(isDelayed)
+  
+  # find the number of delayed flights for each hour
+  df_delayed_grouped_hour <- df_delayed %>% 
+    group_by(CRSDepHour) %>%
+    summarize(count = n()) %>%
+    rename(delayed_count = count)
+  
+  # find the historical probability of a flight being delayed for each hour
+  delayed_prob <- left_join(df_grouped_hour, df_delayed_grouped_hour, by = 'CRSDepHour')
+  all_hours <- data.frame(CRSDepHour = 0:24)
+  delayed_prob <- left_join(all_hours, delayed_prob, by = 'CRSDepHour')
+  delayed_prob <- na.fill(delayed_prob, fill = 0)
+  delayed_prob <- as.data.frame(delayed_prob)
+  delayed_prob$delayed_prob <- delayed_prob$delayed_count / delayed_prob$total_count
+  print(delayed_prob)
+  
+  # Create bar plot
+  barplot(delayed_prob$delayed_prob, 
+          names.arg = delayed_prob$CRSDepHour,
+          xlab = 'Hour of the Day',
+          ylab = 'Historical Probability of Delayed Flights',
+          main = paste('Historical Probability of Delayed Flights by Hour in', year),
+          col = 'deepskyblue3')
+  
+  # Find the total number of flights that occurred for each hour
+  df_grouped_day <- df %>% 
+    group_by(DayOfWeek) %>%
+    summarize(count = n()) %>%
+    rename(total_count = count)
+  
+  # find the number of delayed flights for each day
+  df_delayed_grouped_day <- df_delayed %>% 
+    group_by(DayOfWeek) %>%
+    summarize(count = n()) %>%
+    rename(delayed_count = count)
+  
+  # find the historical probability of a flight being delayed for each day
+  delayed_prob_day = left_join(df_grouped_day, df_delayed_grouped_day,
+                                by = 'DayOfWeek')
+  delayed_prob_day = na.fill(delayed_prob_day, fill = 0)
+  delayed_prob_day <- as.data.frame(delayed_prob_day)
+  delayed_prob_day$delayed_prob <- delayed_prob_day$delayed_count / delayed_prob_day$total_count
+  print(delayed_prob_day)
+  
+  barplot(delayed_prob_day$delayed_prob, names.arg = delayed_prob_day$DayOfWeek,
+        xlab = 'Day of the Week',
+        ylab = 'Historical Probability of Delayed Flights',
+        main = paste('Historical Probability of Delayed Flights by Hour in', year),
+        col = 'deepskyblue3')
+}
+```
+
+```{r 1999_results}
+find_delayed_probability_hour(1999)
+```
+
+### 2000 Data
+```{r 2000_results}
+find_delayed_probability_hour(2000)
+```
+
+### 2001 Data
+```{r 2001_results}
+find_delayed_probability_hour(2001)
+```
+
+### 2002 Data
+```{r 2002_results}
+find_delayed_probability_hour(2002)
+```
+
+### 2003 Data
+```{r 2003_results}
+find_delayed_probability_hour(2003)
+```
+
+### 2004 Data
+```{r 2004_results}
+find_delayed_probability_hour(2004)
+```
+
+### 2005 Data
+```{r 2005_results}
+find_delayed_probability_hour(2005)
+```
+
+### 2006 Data
+```{r 2006_results}
+find_delayed_probability_hour(2006)
+```
+
+### 2007 Data
+```{r 2007_results}
+find_delayed_probability_hour(2007)
+```
+
+## Part (b)
+
+### 1998 Data
+
+Step by step process is done for the first year of data to clarify what the codes does
+
+```{r load_dfs2}
+plane_data <- read.csv("dataverse_files/plane-data.csv")
+tail(plane_data)
+```
+
+```{r tailnum_to_year}
+# Retrieve tail number and issue date
+tailnum_year <- subset(plane_data, select = c("tailnum", "issue_date"))
+# convert to date
+tailnum_year$issue_date = as.Date(tailnum_year$issue_date, format = "%m/%d/%Y")
+# Rename cols to prevent merging issues later on
+names(tailnum_year) <- c("TailNum", "issue_date")
+tailnum_year = na.omit(tailnum_year)
+tailnum_year
+```
+```{r data_transformation}
+# Group by tailnum to find total flights for each tailnum
+df1998_grouped_tailnum = df1998 %>%
+  group_by(TailNum) %>%
+  summarize(count = n()) %>%
+  rename(total_count = count)
+# Group by tailnum to find dekayed flights for each tailnum
+df1998_delayed_grouped_tailnum = df1998_delayed %>%
+  group_by(TailNum) %>%
+  summarize(count = n()) %>%
+  rename(delay_count = count)
+# Merge both dataframes together
+df1998_grouped_tailnum_merged = inner_join(df1998_grouped_tailnum,
+                                          df1998_delayed_grouped_tailnum,
+                                          by = "TailNum")
+# Merge with tailnum year
+df1998_grouped_tailnum_merged = inner_join(df1998_grouped_tailnum_merged,
+                                           tailnum_year,
+                                           by = "TailNum")
+# Create delayed_prob and age columns
+df1998_grouped_tailnum_merged$delayed_prob = 
+  df1998_grouped_tailnum_merged$delay_count / 
+  df1998_grouped_tailnum_merged$total_count
+df1998_grouped_tailnum_merged$Age = 1998 -
+  year(df1998_grouped_tailnum_merged$issue_date)
+# Filter out negative ages and tailnums that have lesser than 100 flights
+df1998_grouped_tailnum_merged = df1998_grouped_tailnum_merged %>%
+  filter(Age >= 0 & total_count >= 100)
+df1998_grouped_tailnum_merged
+```
+
+
+```{r linear_reg}
+# run linear reg
+model = lm(delayed_prob ~ Age, data = df1998_grouped_tailnum_merged)
+summary(model)
+```
+
+```{r plot_delayed_prob2}
+plot(df1998_grouped_tailnum_merged$Age, df1998_grouped_tailnum_merged$delayed_prob,
+     xlab = 'Age of Aircraft',
+     ylab = 'Fraction of Flights that are Delayed',
+     main = 'Scatter Plot of Age of Aircraft vs 
+     Fraction of Delayed Flights in 1998',
+     col = 'deepskyblue3', pch = 19)
+abline(model, col = 'red')
+```
+
+### 1999 Data
+```{r part_b_func}
+# create function to reduce repeated code
+find_delayed_probability_year = function(tailnum_year, year) {
+  if (year == 2001 | year == 2002) {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"), encoding = "Latin-1")
+  } else {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"))
+  }
+  
+  # A flight is considered to be delayed if any of the delay variables have a 
+  # value of 1
+  df$isDelayed <- ifelse(df$DepDelay > 0 | 
+                                  df$ArrDelay > 0 | 
+                                  df$CarrierDelay > 0 | 
+                                  df$WeatherDelay > 0 | 
+                                  df$NASDelay > 0 | 
+                                  df$SecurityDelay > 0 | 
+                                  df$LateAircraftDelay > 0, 
+                                TRUE, FALSE)
+  
+  # find all delayed flights
+  df_delayed <- df %>%
+    filter(isDelayed)
+  
+  # Group by tailnum to find total flights for each tailnum
+  df_grouped_tailnum = df %>%
+    group_by(TailNum) %>%
+    summarize(count = n()) %>%
+    rename(total_count = count)
+  # Group by tailnum to find dekayed flights for each tailnum
+  df_delayed_grouped_tailnum = df_delayed %>%
+    group_by(TailNum) %>%
+    summarize(count = n()) %>%
+    rename(delay_count = count)
+  # Merge both dataframes together
+  df_grouped_tailnum_merged = inner_join(df_grouped_tailnum,
+                                            df_delayed_grouped_tailnum,
+                                            by = "TailNum")
+  # Merge with tailnum year
+  df_grouped_tailnum_merged = inner_join(df_grouped_tailnum_merged,
+                                             tailnum_year,
+                                             by = "TailNum")
+  # Create delayed_prob and age columns
+  df_grouped_tailnum_merged$delayed_prob = 
+    df_grouped_tailnum_merged$delay_count / 
+    df_grouped_tailnum_merged$total_count
+  df_grouped_tailnum_merged$Age = year -
+    year(df_grouped_tailnum_merged$issue_date)
+  # Filter out negative ages and tailnums that have lesser than 100 flights
+  df_grouped_tailnum_merged = df_grouped_tailnum_merged %>%
+    filter(Age >= 0 & total_count >= 100)
+  
+  # run linear reg
+  model = lm(delayed_prob ~ Age, data = df_grouped_tailnum_merged)
+  print(summary(model))
+  
+  plot(df_grouped_tailnum_merged$Age, df_grouped_tailnum_merged$delayed_prob,
+     xlab = 'Age of Aircraft',
+     ylab = 'Fraction of Flights that are Delayed',
+     main = paste('Scatter Plot of Age of Aircraft vs 
+     Fraction of Delayed Flights in', year),
+     col = 'deepskyblue3', pch = 19)
+abline(model, col = 'red')
+}
+```
+
+```{r 1999_results2}
+find_delayed_probability_year(tailnum_year, 1999)
+```
+
+### 2000 Data
+```{r 2000_results2}
+find_delayed_probability_year(tailnum_year, 2000)
+```
+
+### 2001 Data
+```{r 2001_results2}
+find_delayed_probability_year(tailnum_year, 2001)
+```
+
+### 2002 Data
+```{r 2002_results2}
+find_delayed_probability_year(tailnum_year, 2002)
+```
+
+### 2003 Data
+```{r 2003_results2}
+find_delayed_probability_year(tailnum_year, 2003)
+```
+
+### 2004 Data
+```{r 2004_results2}
+find_delayed_probability_year(tailnum_year, 2004)
+```
+
+### 2005 Data
+```{r 2005_results2}
+find_delayed_probability_year(tailnum_year, 2005)
+```
+
+### 2006 Data
+```{r 2006_results2}
+find_delayed_probability_year(tailnum_year, 2006)
+```
+
+### 2007 Data
+```{r 2007_results2}
+find_delayed_probability_year(tailnum_year, 2007)
+```
+
+## Part (c)
+
+### 1998 Data
+
+Step by step process is done for the first year to clarify what the code does
+
+```{r}
+airports <- read.csv("dataverse_files/airports.csv")
+airports_coord <- airports[, c("iata", "lat", "long")]
+head(airports_coord)
+```
+
+```{r}
+# get estimated hour of arrival
+df1998$CRSArrHour = floor(df1998$CRSArrTime / 100)
+# get week of the month
+df1998$WeekofMonth = floor(df1998$DayofMonth / 7)
+# # Change boolean column to integer column
+# df1998$isDelayed[is.na(df1998$isDelayed)] = FALSE
+# df1998$isDelayed <- as.integer(df1998$isDelayed)
+
+# Create dataframe with columns for logistic regression
+reg_cols <- c('Month', 'WeekofMonth', 'DayOfWeek', 'CRSDepHour', 'CRSArrHour', 
+              'UniqueCarrier', 'Origin', 'Dest', 'Distance', 'Diverted')
+df1998_reg <- df1998[, ..reg_cols]
+
+# Join to get lat and long for origin airport
+airports_coord = airports_coord %>%
+  rename(Origin = iata)
+df1998_reg <- left_join(df1998_reg, airports_coord, by = "Origin")
+
+# Join to get lat and long for destination airport
+airports_coord = airports_coord %>%
+  rename(Dest = Origin)
+df1998_reg <- left_join(df1998_reg, airports_coord, by = "Dest")
+
+# Drop Origin and Dest to prevent multicollinearity
+df1998_reg <- subset(df1998_reg, select = -c(Origin, Dest))
+df1998_reg = df1998_reg %>%
+  rename(dest_lat = lat.y, dest_long = long.y,
+         origin_lat = lat.x, origin_long = long.x)
+
+# Restore airports_coord to original naming
+airports_coord = airports_coord %>%
+  rename(iata = Dest)
+
+head(df1998_reg)
+```
+
+```{r}
+# run logistic regression
+log_reg = glm(Diverted ~ Month + WeekofMonth + DayOfWeek + CRSDepHour + 
+              CRSArrHour + UniqueCarrier + Distance + origin_lat + origin_long +
+              dest_lat + dest_long, data = df1998_reg, family = binomial)
+summary(log_reg)
+```
+
+
+```{r}
+# store coefficients into a df
+coef_df <- data.frame(year = 1998:2007)
+for (var in names(coef(log_reg))) {
+    coef_df[1, var] = coef(log_reg)[var]
+}
+coef_df
+```
+
+### 1999 Data
+```{r}
+#create function
+get_coefficients = function(airports_coord, reg_cols, coef_df, year) {
+  if (year == 2001 | year == 2002) {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"), encoding = "Latin-1")
+  } else {
+    df <- fread(paste0("dataverse_files/", year, ".csv.bz2"))
+  }
+  
+  # Find the hour that the flight was scheduled to depart
+  df$CRSDepHour <- floor(df$CRSDepTime / 100)
+  
+  # A flight is considered to be delayed if any of the delay variables have a 
+  # value of 1
+  df$isDelayed <- ifelse(df$DepDelay > 0 | 
+                                  df$ArrDelay > 0 | 
+                                  df$CarrierDelay > 0 | 
+                                  df$WeatherDelay > 0 | 
+                                  df$NASDelay > 0 | 
+                                  df$SecurityDelay > 0 | 
+                                  df$LateAircraftDelay > 0, 
+                                TRUE, FALSE)
+  
+  # get estimated hour of arrival
+  df$CRSArrHour = floor(df$CRSArrTime / 100)
+  # get week of the month
+  df$WeekofMonth = floor(df$DayofMonth / 7)
+  # # Change boolean column to integer column
+  # df$isDelayed[is.na(df$isDelayed)] = FALSE
+  # df$isDelayed <- as.integer(df$isDelayed)
+  
+  # Create dataframe with columns for logistic regression
+  df_reg <- df[, ..reg_cols]
+  
+  # Join to get lat and long for origin airport
+  airports_coord = airports_coord %>%
+    rename(Origin = iata)
+  df_reg <- left_join(df_reg, airports_coord, by = "Origin")
+  
+  # Join to get lat and long for destination airport
+  airports_coord = airports_coord %>%
+    rename(Dest = Origin)
+  df_reg <- left_join(df_reg, airports_coord, by = "Dest")
+  
+  # Drop Origin and Dest to prevent multicollinearity
+  df_reg <- subset(df_reg, select = -c(Origin, Dest))
+  df_reg = df_reg %>%
+    rename(dest_lat = lat.y, dest_long = long.y,
+           origin_lat = lat.x, origin_long = long.x)
+  
+  # Restore airports_coord to original naming
+  airports_coord = airports_coord %>%
+    rename(iata = Dest)
+  
+  # run logistic regression
+  log_reg = glm(Diverted ~ Month + WeekofMonth + DayOfWeek + CRSDepHour + 
+                CRSArrHour + UniqueCarrier + Distance + origin_lat + origin_long +
+                dest_lat + dest_long, data = df_reg, family = binomial)
+  print(summary(log_reg))
+  
+  # store coefficients into a df
+  for (var in names(coef(log_reg))) {
+    coef_df[year-1997, var] = coef(log_reg)[var]
+  }
+  return(coef_df)
+}
+```
+
+```{r 1999_coefs}
+reg_cols <- c('Month', 'WeekofMonth', 'DayOfWeek', 'CRSDepHour', 'CRSArrHour', 
+              'UniqueCarrier', 'Origin', 'Dest', 'Distance', 'Diverted')
+coef_df <- data.frame(year = 1998:2007)
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 1999)
+```
+
+### 2000 Data
+```{r 2000_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2000)
+```
+
+### 2001 Data
+```{r 2001_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2001)
+```
+
+### 2002 Data
+```{r 2002_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2002)
+```
+
+### 2003 Data
+```{r 2003_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2003)
+```
+
+### 2004 Data
+```{r 2004_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2004)
+```
+
+### 2005 Data
+```{r 2005_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2005)
+```
+
+### 2006 Data
+```{r 2006_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2006)
+```
+
+### 2007 Data
+```{r 2007_coefs}
+coef_df = get_coefficients(airports_coord, reg_cols, coef_df, 2007)
+```
+
+
+```{r}
+coef_df
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = `(Intercept)`)) +
+  geom_line() +
+  labs(x = "Year", y = "(Intercept)") + 
+  ggtitle("Line Chart of Coefficient of (Intercept) Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = Month)) +
+  geom_line() +
+  labs(x = "Year", y = "Month") + 
+  ggtitle("Line Chart of Coefficient of Month Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = WeekofMonth)) +
+  geom_line() +
+  labs(x = "Year", y = "WeekofMonth") + 
+  ggtitle("Line Chart of Coefficient of WeekofMonth Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = DayOfWeek)) +
+  geom_line() +
+  labs(x = "Year", y = "DayOfWeek") + 
+  ggtitle("Line Chart of Coefficient of DayOfWeek Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = CRSDepHour)) +
+  geom_line() +
+  labs(x = "Year", y = "CRSDepHour") + 
+  ggtitle("Line Chart of Coefficient of CRSDepHour Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = CRSArrHour)) +
+  geom_line() +
+  labs(x = "Year", y = "CRSArrHour") + 
+  ggtitle("Line Chart of Coefficient of CRSArrHour Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = Distance)) +
+  geom_line() +
+  labs(x = "Year", y = "Distance") + 
+  ggtitle("Line Chart of Coefficient of Distance Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = origin_lat)) +
+  geom_line() +
+  labs(x = "Year", y = "origin_lat") + 
+  ggtitle("Line Chart of Coefficient of origin_lat Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = origin_long)) +
+  geom_line() +
+  labs(x = "Year", y = "origin_long") + 
+  ggtitle("Line Chart of Coefficient of origin_long Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = dest_lat)) +
+  geom_line() +
+  labs(x = "Year", y = "dest_lat") + 
+  ggtitle("Line Chart of Coefficient of dest_lat Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = dest_long)) +
+  geom_line() +
+  labs(x = "Year", y = "dest_long") + 
+  ggtitle("Line Chart of Coefficient of dest_long Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierAS)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierAS") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierAS Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierCO)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierCO") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierCO Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierDL)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierDL") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierDL Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierHP)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierHP") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierHP Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierNW)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierNW") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierNW Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierTW)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierTW") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierTW Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierUA)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierUA") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierUA Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierUS)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierUS") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierUS Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierWN)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierWN") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierWN Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierAQ)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierAQ") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierAQ Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierMQ)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierMQ") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierMQ Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierB6)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierB6") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierB6 Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierDH)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierDH") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierDH Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierEV)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierEV") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierEV Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierFL)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierFL") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierFL Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierHA)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierHA") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierHA Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierOO)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierOO") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierOO Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierTZ)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierTZ") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierTZ Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierXE)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierXE") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierXE Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierOH)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierOH") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierOH Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierF9)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierF9") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierF9 Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierYV)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierYV") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierYV Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+```{r}
+ggplot(coef_df, aes(x = year, y = UniqueCarrierAA)) +
+  geom_line() +
+  labs(x = "Year", y = "UniqueCarrierAA") + 
+  ggtitle("Line Chart of Coefficient of UniqueCarrierAA Over Years") +
+  scale_x_continuous(breaks = seq(min(coef_df$year), max(coef_df$year), by = 1),
+                     labels = seq(min(coef_df$year), max(coef_df$year), by = 1))
+```
+
+
+
